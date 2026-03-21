@@ -1,0 +1,45 @@
+# Pretrain data preparation for DELBERT.
+#
+# Prepares data for self-supervised pretraining (MLM):
+# - Loads datasets from HuggingFace
+# - Builds vocabulary
+# - Tokenizes molecules into fingerprint token sequences
+# - Creates train/val split
+#
+# Usage:
+#   python scripts/prepare_pretrain_data.py --config-name pretrain/example
+
+experiment_id: wdr91_pretrain
+output_base: processed_data/pretrain
+
+# HuggingFace dataset
+dataset_path: wanglab/delbert-data
+datasets:
+  - WDR91
+
+# Fingerprint types (must match what's in the dataset)
+fingerprint_types:
+  - ECFP4
+  - FCFP6
+  - ATOMPAIR
+  - TOPTOR
+
+# Tokenization settings
+max_length: 1024
+token_format: count       # "binary" or "count"
+fingerprint_nbits: 2048   # Used only when token_format: binary
+
+# Count-mode vocabulary parameters (used only when token_format: count)
+min_token_frequency: 100
+vocab_sample_fraction: 1.0
+
+# Segment IDs for segment-based attention (recommended)
+return_segment_ids: true
+
+# Train/val split
+splits:
+  train: 0.95
+  val: 0.05
+
+num_workers: 4
+seed: 42

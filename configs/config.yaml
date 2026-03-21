@@ -1,0 +1,22 @@
+# Base Hydra configuration for DELBERT training scripts.
+#
+# This is the root config that loads experiment-specific configs.
+# Do not run this config directly -- specify an experiment config instead.
+#
+# Usage:
+#   python scripts/pretrain.py experiment=pretrain_example
+#   python scripts/train_classifier.py experiment=classify_example
+
+defaults:
+  - experiment: ???  # Must specify an experiment
+  - _self_
+
+hydra:
+  mode: RUN
+  run:
+    dir: outputs/${experiment_name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: outputs/${experiment_name}/sweeps/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: true

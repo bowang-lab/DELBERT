@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "delbert"
+version = "0.1.0"
+description = "DELBERT: Fingerprint Language Modeling for Generalizable Hit Discovery in DNA-Encoded Libraries"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Arman Seyed-Ahmadi"},
+    {name = "Bing Hu"},
+    {name = "Armin Geraili"},
+    {name = "Anita Layton"},
+    {name = "Helen Chen"},
+    {name = "Shana O. Kelley"},
+    {name = "Bo Wang"},
+]
+
+dependencies = [
+    "torch>=2.0",
+    "transformers>=4.40",
+    "pytorch-lightning>=2.0",
+    "datasets>=2.14",
+    "hydra-core>=1.3",
+    "omegaconf>=2.3",
+    "scikit-learn>=1.2",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "pyyaml>=6.0",
+    "tqdm>=4.60",
+    "wandb>=0.15",
+]
+
+[project.optional-dependencies]
+lora = ["peft>=0.6"]
+baselines = [
+    "lightgbm>=4.0",
+    "xgboost>=2.0",
+    "polars>=0.20",
+    "rdkit>=2023.03",
+]
+all = ["delbert[lora,baselines]"]
+
+[project.urls]
+Homepage = "https://github.com/bowang-lab/DELBERT"
+Paper = "https://openreview.net/forum?id=wOOD4W3wJk"
+
+[tool.setuptools.packages.find]
+include = ["delbert*"]

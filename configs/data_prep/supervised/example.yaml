@@ -1,0 +1,41 @@
+# Supervised data preparation for DELBERT with library-based OOD split.
+#
+# Prepares labeled data for supervised classification:
+# - Loads labeled dataset from HuggingFace
+# - Reuses tokenizer from pretraining
+# - Creates test split FIRST (locked), then train/val
+#
+# Usage:
+#   python scripts/prepare_supervised_data.py --config-name supervised/example
+
+output_folder: wdr91_library_ood
+
+# Tokenizer from pretraining (must exist before running this script)
+pretrain_tokenizer_path: processed_data/pretrain/wdr91_pretrain/tokenizer
+
+# HuggingFace dataset
+dataset_path: wanglab/delbert-data
+dataset_name: WDR91
+
+# Column configuration
+label_column: LABEL
+compound_id_column: COMPOUND_ID
+library_id_column: LIBRARY_ID
+
+# Split strategy: "random" or "library_ood"
+split_strategy: library_ood
+
+# Library grouping settings (for library_ood strategy)
+min_library_size: 1000
+
+# Split fractions
+# For library_ood: fractions refer to LIBRARIES, not molecules
+# Test is created FIRST, then remaining is split into train/val
+splits:
+  test: 0.15
+  train: 0.80
+  val: 0.20
+
+max_length: 1024
+num_workers: 4
+seed: 42

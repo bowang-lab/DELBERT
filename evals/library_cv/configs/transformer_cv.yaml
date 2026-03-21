@@ -1,0 +1,113 @@
+# Library K-Fold Cross-Validation Configuration for DELBERT Transformer
+#
+# Runs K-fold CV where:
+# - Molecules are grouped into K folds by fold_strategy (library, cluster, or random)
+# - For each fold: train on K-1 folds, test on 1 fold
+# - Inner train/val split for early stopping
+#
+# Usage:
+#   python evals/library_cv/scripts/run_transformer_cv_orchestrator.py \
+#     --config evals/library_cv/configs/transformer_cv.yaml
+
+experiment_name: delbert_wdr91_20fold
+
+seed: 37
+
+# Cross-validation settings
+cv:
+  n_folds: 20
+
+  # Fold assignment strategy:
+  #   'library' - keeps libraries together (prevents library-level data leakage)
+  #   'random'  - stratified random (ignores library structure)
+  #   'cluster' - keeps structurally similar molecules together (LeaderPicker)
+  fold_strategy: library
+  fold_assignments_path: null  # Set to path to reuse existing fold assignments
+
+  # Inner validation for early stopping
+  inner_val_strategy: random
+  inner_val_fraction: 0.025
+
+# Library grouping settings
+library:
+  column: LIBRARY_ID
+  min_library_size: 1000
+
+# Data configuration
+data:
+  cache_mode: use_if_valid
+  dataset_path: wanglab/delbert-data
+  dataset_name: WDR91
+  tokenizer_dir: processed_data/pretrain/wdr91_pretrain/tokenizer
+  batch_size: 100
+  num_workers: 8
+  prefetch_factor: 16
+  pin_memory: true
+  persistent_workers: true
+  max_length: 1024
+  return_segment_ids: true
+
+# Pretrained checkpoint path
+pretrained_checkpoint: null  # e.g., outputs/pretrain_wdr91/.../checkpoints/best/epoch=XX-val_loss=X.XXX.ckpt
+
+# Model configuration
+model:
+  num_labels: 2
+  classifier_dropout: 0.1
+  classifier_pooling: mean
+
+  loss_type: weighted_ce
+  pos_class_weight: 15.0
+
+  finetuning_strategy: lora
+  strategy_params:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.1
+    target_modules: ['Wqkv']
+
+# Training configuration (per fold)
+train:
+  num_epochs: 10
+  learning_rate: 5e-4
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  gradient_clip_val: 1.0
+  gradient_accumulation_steps: 1
+
+  devices: 4
+  accelerator: gpu
+  strategy: auto
+  precision: bf16-mixed
+  matmul_precision: medium
+  enable_tf32: true
+
+  monitor: val_pr_auc
+  mode: max
+  save_top_k: 1
+  save_last: false
+
+  early_stopping:
+    enabled: true
+    monitor: val_pr_auc
+    patience: 5
+    mode: max
+    min_delta: 0.01
+
+  log_every_n_steps: 10
+  check_val_every_n_epoch: 1
+
+# Weights & Biases
+wandb:
+  enabled: true
+  project: delbert-library-cv
+  entity: null
+  name: ${experiment_name}
+  group: ${experiment_name}
+  tags: []
+
+# Output settings
+output:
+  base_dir: evals/library_cv/results/transformer
+  save_predictions: true
+  save_fold_checkpoints: true

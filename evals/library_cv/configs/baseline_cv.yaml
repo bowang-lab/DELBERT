@@ -1,0 +1,84 @@
+# Library K-Fold Cross-Validation Configuration for Baseline Models
+#
+# Runs library-based K-fold CV with XGBoost, LightGBM, etc.
+# Uses the SAME fold assignments as transformer for fair comparison.
+#
+# Usage:
+#   python evals/library_cv/scripts/run_baseline_cv.py \
+#     --config evals/library_cv/configs/baseline_cv.yaml
+
+experiment_name: baselines_wdr91_20fold
+
+seed: 42
+
+# Cross-validation settings
+cv:
+  n_folds: 20
+  fold_strategy: library
+  # IMPORTANT: Use same fold assignments as transformer for fair comparison
+  fold_assignments_path: null  # Set to path of fold assignments YAML
+
+# Library grouping settings (must match transformer config)
+library:
+  column: LIBRARY_ID
+  min_library_size: 1000
+
+# Data source (parquet file with fingerprint columns)
+data:
+  parquet_path: data/WDR91/WDR91.parquet
+  label_column: LABEL
+  compound_id_column: COMPOUND_ID
+
+# Fingerprint configuration
+fingerprints:
+  types:
+    - FCFP6
+    - ECFP4
+    - ATOMPAIR
+    - TOPTOR
+  binarize: true
+
+# Model configuration
+model:
+  types:
+    - xgb
+    - lgbm
+  n_estimators: 300
+  n_jobs: 4
+
+  xgb:
+    tree_method: gpu_hist
+    device: cuda
+    scale_pos_weight: 15.0
+
+  lgbm:
+    device: gpu
+    gpu_platform_id: 0
+    gpu_device_id: 0
+    scale_pos_weight: 15.0
+
+# Inner ensemble
+ensemble:
+  n_members: 5
+  shuffle: true
+
+# Splitting for inner ensemble
+splitting:
+  method: cluster
+  cluster:
+    threshold: 0.8
+    fingerprint: FCFP6
+
+# Weights & Biases
+wandb:
+  enabled: true
+  project: delbert-library-cv
+  entity: null
+  group: ${experiment_name}
+  tags:
+    - baseline
+
+# Output settings
+output:
+  base_dir: evals/library_cv/results/baseline
+  save_predictions: true
