@@ -128,23 +128,13 @@ class FrozenEncoder(FinetuningStrategy):
             param.requires_grad = False
 
         # Unfreeze classifier head
-        # Our custom wrapper models have: model.classifier
-        inner_model = model.model if hasattr(model, 'model') else model
-
-        # Check for our custom wrapper models (have .model encoder and .classifier)
-        is_custom_wrapper = (
-            hasattr(inner_model, 'model') and
-            hasattr(inner_model, 'classifier') and
-            hasattr(inner_model, 'dropout')
-        )
-
-        if is_custom_wrapper:
-            # Unfreeze the classifier for our custom wrapper models
-            for param in inner_model.classifier.parameters():
+        # model is DELBERTForSequenceClassification with .encoder and .classifier
+        if hasattr(model, 'classifier'):
+            for param in model.classifier.parameters():
                 param.requires_grad = True
         else:
-            # Standard HF model - look for classifier/head/pooler in names
-            for name, param in inner_model.named_parameters():
+            # Fallback for other model types
+            for name, param in model.named_parameters():
                 if 'classifier' in name or 'head' in name or 'pooler' in name:
                     param.requires_grad = True
 
@@ -221,60 +211,27 @@ class LoRAFinetuning(FinetuningStrategy):
                 "Install with: pip install peft"
             )
 
-        # Get the underlying model
-        # model is DELBERTForSequenceClassification
-        # model.model is one of our custom wrapper classes
-        inner_model = model.model
+        # model is DELBERTForSequenceClassification with .encoder and .classifier
+        # Apply LoRA to the encoder only
+        encoder = model.encoder
 
-        # Check if this is one of our custom wrapper models
-        # Both SegmentAttentionModernBertForSequenceClassification and
-        # ModernBertForSequenceClassificationWithSegmentEmbeds have .model (encoder) and .classifier
-        is_custom_wrapper = (
-            hasattr(inner_model, 'model') and
-            hasattr(inner_model, 'classifier') and
-            hasattr(inner_model, 'dropout')
+        lora_config = LoraConfig(
+            task_type=TaskType.FEATURE_EXTRACTION,
+            r=self.r,
+            lora_alpha=self.lora_alpha,
+            lora_dropout=self.lora_dropout,
+            target_modules=self.target_modules,
+            bias="none",
         )
 
-        if is_custom_wrapper:
-            # For our custom wrapper models, apply LoRA to just the encoder
-            # inner_model.model is the encoder (SegmentAttentionModernBertModel or ModernBertModelWithSegmentEmbeds)
-            encoder = inner_model.model
+        peft_encoder = get_peft_model(encoder, lora_config)
+        model.encoder = peft_encoder
 
-            # Configure LoRA for the encoder (FEATURE_EXTRACTION since it's just the encoder)
-            lora_config = LoraConfig(
-                task_type=TaskType.FEATURE_EXTRACTION,
-                r=self.r,
-                lora_alpha=self.lora_alpha,
-                lora_dropout=self.lora_dropout,
-                target_modules=self.target_modules,
-                bias="none",
-            )
+        # Ensure classification head is trainable
+        for param in model.classifier.parameters():
+            param.requires_grad = True
 
-            # Apply LoRA to encoder only
-            peft_encoder = get_peft_model(encoder, lora_config)
-            inner_model.model = peft_encoder
-
-            # Ensure classification head is trainable
-            for param in inner_model.classifier.parameters():
-                param.requires_grad = True
-
-            print(f"  Strategy: LoRA Finetuning")
-        else:
-            # Standard HuggingFace model - apply LoRA to the whole classification model
-            lora_config = LoraConfig(
-                task_type=TaskType.SEQ_CLS,
-                r=self.r,
-                lora_alpha=self.lora_alpha,
-                lora_dropout=self.lora_dropout,
-                target_modules=self.target_modules,
-                bias="none",
-            )
-
-            # Apply LoRA - this wraps the model
-            peft_model = get_peft_model(inner_model, lora_config)
-            model.model = peft_model
-
-            print(f"  Strategy: LoRA Finetuning")
+        print(f"  Strategy: LoRA Finetuning")
 
         # Log trainable parameters
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

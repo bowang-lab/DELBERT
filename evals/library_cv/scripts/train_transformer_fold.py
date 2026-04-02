@@ -38,7 +38,6 @@ from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent.parent
 
 from delbert.data.tokenizer import MolecularTokenizer
 from delbert.data.transforms import MolecularCollator

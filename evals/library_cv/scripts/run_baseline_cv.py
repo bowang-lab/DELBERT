@@ -44,7 +44,6 @@ from lightgbm import LGBMClassifier
 from sklearn.ensemble import RandomForestClassifier
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent.parent
 
 from delbert.data.cv_utils import (
     create_library_kfold_splits,

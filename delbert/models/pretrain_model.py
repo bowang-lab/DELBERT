@@ -10,7 +10,7 @@ from transformers import get_cosine_schedule_with_warmup
 from typing import Dict, Any, Optional
 import wandb
 
-from .delbert_model import DELBERTConfig, DELBERTForMLM
+from .delbert_model import DELBERTConfig, DELBERTForMLM, apply_layer_types
 
 
 class PretrainModel(pl.LightningModule):
@@ -66,7 +66,7 @@ class PretrainModel(pl.LightningModule):
         # Apply custom layer_types if specified
         layer_types = config.get('layer_types')
         if layer_types:
-            self._apply_layer_types(layer_types, config.get('local_attention', 128))
+            apply_layer_types(self.model.encoder, layer_types, config.get('local_attention', 128))
             # Store layer_types in model config for checkpoint saving
             self.model.config.layer_types = layer_types
 
@@ -75,30 +75,6 @@ class PretrainModel(pl.LightningModule):
         self.warmup_ratio = warmup_ratio
         self.warmup_steps = warmup_steps
         self.weight_decay = weight_decay
-
-    def _apply_layer_types(self, layer_types: list, local_attention_window: int):
-        """
-        Apply custom attention patterns to model layers.
-
-        Args:
-            layer_types: List of 'full_attention' or 'sliding_attention' per layer
-            local_attention_window: Window size for sliding attention
-        """
-        encoder = self.model.model.model  # DELBERTForMLM -> ModernBertForMaskedLM -> ModernBertModel
-
-        if len(layer_types) != len(encoder.layers):
-            raise ValueError(
-                f"layer_types has {len(layer_types)} entries but model has {len(encoder.layers)} layers"
-            )
-
-        half_window = local_attention_window // 2
-        for i, (layer, layer_type) in enumerate(zip(encoder.layers, layer_types)):
-            if layer_type == 'full_attention':
-                layer.attn.local_attention = (-1, -1)
-            elif layer_type == 'sliding_attention':
-                layer.attn.local_attention = (half_window, half_window)
-            else:
-                raise ValueError(f"Unknown layer_type '{layer_type}' at index {i}. Use 'full_attention' or 'sliding_attention'")
 
     def forward(self, input_ids, attention_mask=None, segment_ids=None, labels=None):
         """Forward pass."""

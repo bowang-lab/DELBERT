@@ -6,6 +6,7 @@ Supports both:
 - Finetuning from a pretrained MLM checkpoint
 """
 
+import math
 import os
 import pytorch_lightning as pl
 import torch
@@ -225,6 +226,8 @@ class ClassificationModel(pl.LightningModule):
                 classifier_pooling=classifier_pooling,
                 use_segment_attention=model_config.get('use_segment_attention', False),
                 segment_position_encoding=model_config.get('segment_position_encoding', 'absolute'),
+                use_segment_embeddings=model_config.get('use_segment_embeddings', False),
+                num_segment_types=model_config.get('num_segment_types', 8),
             )
 
             self.model = DELBERTForSequenceClassification(config, num_labels=num_labels)
@@ -240,13 +243,12 @@ class ClassificationModel(pl.LightningModule):
                 config_changed = True
 
             # Recreate classifier head if config changed
-            # Both custom models (SegmentAttention and WithSegmentEmbeds) use 'classifier'
             if config_changed:
-                self.model.model.classifier = nn.Linear(
+                self.model.classifier = nn.Linear(
                     self.model.config.hidden_size,
                     num_labels
                 )
-                self.model.model.dropout = nn.Dropout(classifier_dropout)
+                self.model.dropout = nn.Dropout(classifier_dropout)
 
         # Print model info
         print(f"  Hidden size: {self.model.config.hidden_size}")
@@ -375,8 +377,8 @@ class ClassificationModel(pl.LightningModule):
         # Log metrics (detach to prevent memory leak with on_epoch=True)
         self.log('train_loss', loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        # Log to W&B
-        if self.logger:
+        # Log to W&B (only rank 0 to avoid duplicate/noisy logs in DDP)
+        if self.logger and self.trainer.is_global_zero:
             self.logger.log_metrics({
                 'train/loss': loss.item(),
                 'train/learning_rate': self.optimizers().param_groups[0]['lr']
@@ -445,8 +447,13 @@ class ClassificationModel(pl.LightningModule):
         local_logits = torch.cat([x['logits'] for x in self.validation_outputs], dim=0)
         local_labels = torch.cat([x['labels'] for x in self.validation_outputs], dim=0)
 
+        # Get true validation dataset size for DistributedSampler padding removal
+        val_dataset_size = self._get_dataloader_dataset_size(self.trainer.val_dataloaders)
+
         # Gather from all GPUs with proper handling of DistributedSampler padding
-        all_logits, all_labels = self._gather_ddp_outputs(local_logits, local_labels)
+        all_logits, all_labels = self._gather_ddp_outputs(
+            local_logits, local_labels, dataset_size=val_dataset_size
+        )
 
         # Move to CPU for sklearn metrics
         all_probs = F.softmax(all_logits, dim=-1).float().cpu().numpy()
@@ -517,8 +524,13 @@ class ClassificationModel(pl.LightningModule):
         local_logits = torch.cat([x['logits'] for x in self.test_outputs], dim=0)
         local_labels = torch.cat([x['labels'] for x in self.test_outputs], dim=0)
 
+        # Get true test dataset size for DistributedSampler padding removal
+        test_dataset_size = self._get_dataloader_dataset_size(self.trainer.test_dataloaders)
+
         # Gather from all GPUs with proper handling of DistributedSampler padding
-        all_logits, all_labels = self._gather_ddp_outputs(local_logits, local_labels)
+        all_logits, all_labels = self._gather_ddp_outputs(
+            local_logits, local_labels, dataset_size=test_dataset_size
+        )
 
         # Move to CPU for sklearn metrics
         all_probs = F.softmax(all_logits, dim=-1).float().cpu().numpy()
@@ -610,21 +622,35 @@ class ClassificationModel(pl.LightningModule):
 
         return metrics
 
+    @staticmethod
+    def _get_dataloader_dataset_size(dataloaders) -> Optional[int]:
+        """Extract dataset size from a dataloader or list of dataloaders."""
+        if dataloaders is None:
+            return None
+        # Lightning may wrap dataloaders in a list or CombinedLoader
+        dl = dataloaders[0] if isinstance(dataloaders, (list, tuple)) else dataloaders
+        if hasattr(dl, 'dataset'):
+            return len(dl.dataset)
+        return None
+
     def _gather_ddp_outputs(
         self,
         local_logits: torch.Tensor,
-        local_labels: torch.Tensor
+        local_labels: torch.Tensor,
+        dataset_size: Optional[int] = None
     ) -> tuple:
         """
         Gather outputs from all DDP ranks, removing DistributedSampler padding.
 
         When dataset size is not evenly divisible by world_size, DistributedSampler
-        pads with duplicate samples. This method tracks actual sizes and removes
-        padding after gathering to avoid biasing metrics like ROC-AUC and PR-AUC.
+        pads with duplicate samples so each rank gets ceil(N/W) samples. The last
+        (ceil(N/W)*W - N) ranks have 1 padding sample at the end of their shard.
 
         Args:
             local_logits: Logits from this rank, shape (local_size, num_classes)
             local_labels: Labels from this rank, shape (local_size,)
+            dataset_size: True dataset size (before padding). Required for proper
+                         deduplication in multi-GPU. If None, no trimming is done.
 
         Returns:
             Tuple of (all_logits, all_labels) with padding removed
@@ -632,30 +658,35 @@ class ClassificationModel(pl.LightningModule):
         if self.trainer.world_size == 1:
             return local_logits, local_labels
 
-        # Track actual local size BEFORE any DDP padding occurs
-        local_size = torch.tensor(
-            [local_logits.shape[0]],
-            dtype=torch.long,
-            device=local_logits.device
-        )
-
-        # Gather sizes from all ranks: (world_size, 1) -> (world_size,)
-        all_sizes = self.all_gather(local_size).view(-1)
-
-        # Gather padded logits and labels
-        # gathered_logits shape: (world_size, max_local_size, num_classes)
-        # gathered_labels shape: (world_size, max_local_size)
+        # Gather logits and labels from all ranks
+        # gathered shape: (world_size, local_size, ...)
         gathered_logits = self.all_gather(local_logits)
         gathered_labels = self.all_gather(local_labels)
 
-        # Extract valid (non-padded) samples from each rank
+        world_size = self.trainer.world_size
+        samples_per_rank = local_logits.shape[0]  # = ceil(N / W), same on all ranks
+
+        if dataset_size is not None:
+            # Compute how many ranks have padding.
+            # DistributedSampler pads the dataset to total_size = ceil(N/W) * W.
+            # It then assigns indices round-robin: rank r gets global[r::W].
+            # The padding indices are at the END of the global list, so the
+            # last P ranks (by index) each have 1 extra (duplicate) sample.
+            padding = samples_per_rank * world_size - dataset_size
+        else:
+            padding = 0
+
         valid_logits = []
         valid_labels = []
 
-        for rank_idx in range(self.trainer.world_size):
-            size = all_sizes[rank_idx].item()
-            valid_logits.append(gathered_logits[rank_idx, :size, :])
-            valid_labels.append(gathered_labels[rank_idx, :size])
+        for rank_idx in range(world_size):
+            if rank_idx >= world_size - padding:
+                # This rank has 1 padding sample at the end — trim it
+                valid = samples_per_rank - 1
+            else:
+                valid = samples_per_rank
+            valid_logits.append(gathered_logits[rank_idx, :valid, :])
+            valid_labels.append(gathered_labels[rank_idx, :valid])
 
         all_logits = torch.cat(valid_logits, dim=0)
         all_labels = torch.cat(valid_labels, dim=0)

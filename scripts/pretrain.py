@@ -12,6 +12,7 @@ import os
 # Fix for OpenMP conflict on macOS
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
+import sys
 
 import hydra
 from omegaconf import DictConfig, OmegaConf

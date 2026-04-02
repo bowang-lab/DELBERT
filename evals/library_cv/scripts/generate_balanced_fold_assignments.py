@@ -23,7 +23,7 @@ The bounded mode is particularly useful for drug discovery datasets where:
 Usage Examples:
     # Minimum rate only (at least 4% positives per fold)
     python evals/library_cv/scripts/generate_balanced_fold_assignments.py \
-        --dataset wanglab/delbert-data \
+        --dataset wanglab/delbert_data \
         --dataset_name LRRK2 \
         --n_folds 20 \
         --min_positive_rate 0.04 \
@@ -32,7 +32,7 @@ Usage Examples:
 
     # Bounded rate (3-15% positives per fold, at least 1000 samples)
     python evals/library_cv/scripts/generate_balanced_fold_assignments.py \
-        --dataset wanglab/delbert-data \
+        --dataset wanglab/delbert_data \
         --dataset_name DCAF7 \
         --n_folds 20 \
         --min_positive_rate 0.03 \
@@ -53,7 +53,6 @@ import numpy as np
 from datasets import load_dataset, load_from_disk
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent.parent
 
 from delbert.data.cv_utils import (
     create_positive_balanced_library_kfold_splits,
@@ -70,18 +69,18 @@ def main():
         epilog="""
 Examples:
   # Minimum rate only (at least 4%% positives per fold)
-  %(prog)s --dataset wanglab/delbert-data --dataset_name LRRK2 --n_folds 20 \\
+  %(prog)s --dataset wanglab/delbert_data --dataset_name LRRK2 --n_folds 20 \\
       --min_positive_rate 0.04 --output LRRK2_20fold_balanced.yaml
 
   # Bounded rate (3-20%% positives, at least 1000 samples per fold)
-  %(prog)s --dataset wanglab/delbert-data --dataset_name DCAF7 --n_folds 20 \\
+  %(prog)s --dataset wanglab/delbert_data --dataset_name DCAF7 --n_folds 20 \\
       --min_positive_rate 0.03 --max_positive_rate 0.20 --min_fold_size 1000 \\
       --output DCAF7_bounded.yaml
         """
     )
     parser.add_argument(
         '--dataset', type=str, required=True,
-        help='HuggingFace dataset path (e.g., wanglab/delbert-data) or local path'
+        help='HuggingFace dataset path (e.g., wanglab/delbert_data) or local path'
     )
     parser.add_argument(
         '--dataset_name', type=str, required=True,

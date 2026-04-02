@@ -34,7 +34,6 @@ from omegaconf import OmegaConf
 from datasets import load_dataset, load_from_disk
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent.parent
 
 from delbert.data.tokenizer import MolecularTokenizer
 from delbert.data.cv_utils import (
@@ -215,7 +214,18 @@ def prepare_dataset(cfg: dict, cache_dir: Path, project_root: Path):
                         f"Delete cache and re-run: rm -rf {processed_path}"
                     )
 
-                return str(processed_path), tokenizer_dir, full_dataset
+                # STRICT: Verify no duplicate COMPOUND_IDs in cached dataset.
+                # Stale caches (created before dedup-at-save fix) may still
+                # contain duplicates. Force rebuild if found.
+                n_cached = len(full_dataset)
+                n_unique = len(set(full_dataset['COMPOUND_ID']))
+                if n_unique != n_cached:
+                    n_dupes = n_cached - n_unique
+                    print(f"\nCRITICAL: Cached dataset has {n_dupes} duplicate COMPOUND_IDs!")
+                    print("Deleting stale cache and rebuilding with deduplication...")
+                    shutil.rmtree(processed_path)
+                else:
+                    return str(processed_path), tokenizer_dir, full_dataset
         else:
             print("\nWARNING: Cache has no metadata.json - cannot verify it matches current config")
             print("Deleting unverified cache and rebuilding...")
@@ -237,6 +247,23 @@ def prepare_dataset(cfg: dict, cache_dir: Path, project_root: Path):
             f"Available columns: {full_dataset.column_names}. "
             f"Cannot proceed without labels."
         )
+
+    # Deduplicate COMPOUND_IDs BEFORE tokenizing and saving to disk.
+    # This ensures the on-disk cache is always clean, so subprocess fold
+    # scripts that load from disk get the exact same dataset the orchestrator
+    # used to compute fold assignment indices.
+    compound_ids_list = full_dataset['COMPOUND_ID']
+    seen = set()
+    unique_indices = []
+    for i, cid in enumerate(compound_ids_list):
+        if cid not in seen:
+            seen.add(cid)
+            unique_indices.append(i)
+    n_dupes = len(full_dataset) - len(unique_indices)
+    if n_dupes > 0:
+        print(f"Deduplicating: removed {n_dupes} duplicate COMPOUND_IDs "
+              f"({len(full_dataset)} -> {len(unique_indices)})")
+        full_dataset = full_dataset.select(unique_indices)
 
     # Report label distribution
     labels = full_dataset['LABEL']
@@ -698,22 +725,17 @@ def main():
 
             del ckpt  # Free memory
 
-    # Deduplicate compound IDs (baselines deduplicate via polars .unique(),
-    # so the transformer must also deduplicate to ensure identical evaluation populations)
+    # STRICT: Verify no duplicate COMPOUND_IDs remain.
+    # Deduplication happens in prepare_dataset() before saving the cache to disk.
+    # If duplicates are found here, the cache is stale — force regeneration.
     n_total = len(full_dataset)
-    compound_ids_list = full_dataset['COMPOUND_ID']
-    seen = set()
-    unique_indices = []
-    for i, cid in enumerate(compound_ids_list):
-        if cid not in seen:
-            seen.add(cid)
-            unique_indices.append(i)
-    n_unique = len(unique_indices)
-    if n_unique < n_total:
-        n_dupes = n_total - n_unique
-        print(f"WARNING: Removed {n_dupes} duplicate COMPOUND_IDs from dataset "
-              f"({n_total} total -> {n_unique} unique)")
-        full_dataset = full_dataset.select(unique_indices)
+    n_unique = len(set(full_dataset['COMPOUND_ID']))
+    if n_unique != n_total:
+        raise ValueError(
+            f"CRITICAL: {n_total - n_unique} duplicate COMPOUND_IDs in dataset! "
+            f"The on-disk cache is stale and was not properly deduplicated. "
+            f"Set cache_mode: force_regenerate in your config and re-run."
+        )
 
     # Get data for fold creation
     library_ids = np.array(full_dataset[cfg['library']['column']])
