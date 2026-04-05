@@ -2,7 +2,7 @@
 
 **DELBERTL: Fingerprint Language Modeling for Generalizable Hit Discovery in DNA-Encoded Libraries**
 
-[Paper](https://openreview.net/forum?id=wOOD4W3wJk) | [Data](https://huggingface.co/datasets/wanglab/delbert_data) | [Models](https://huggingface.co/wanglab/delbert-wdr91)
+[Paper](https://openreview.net/forum?id=wOOD4W3wJk) | [HF Collection](https://huggingface.co/collections/wanglab/delbert) | [Data](https://huggingface.co/datasets/wanglab/delbert_data) | [Models](https://huggingface.co/collections/wanglab/delbert)
 
 *Published at the [ICLR 2026 Workshop on Machine Learning for Genomics Explorations](https://mlgenx.github.io/)*
 
@@ -97,11 +97,14 @@ Each dataset contains molecules represented as sparse molecular fingerprints (EC
 
 ## Pretrained Models
 
-Pretrained checkpoints are available on HuggingFace:
+Finetuned classification checkpoints for all four AIRCHECK targets are available on HuggingFace ([full collection](https://huggingface.co/collections/wanglab/delbert)):
 
 | Model | Target | HuggingFace |
 |-------|--------|-------------|
 | DELBERT-WDR91 | WDR91 | [wanglab/delbert-wdr91](https://huggingface.co/wanglab/delbert-wdr91) |
+| DELBERT-LRRK2 | LRRK2 | [wanglab/delbert-lrrk2](https://huggingface.co/wanglab/delbert-lrrk2) |
+| DELBERT-SETDB1 | SETDB1 | [wanglab/delbert-setdb1](https://huggingface.co/wanglab/delbert-setdb1) |
+| DELBERT-DCAF7 | DCAF7 | [wanglab/delbert-dcaf7](https://huggingface.co/wanglab/delbert-dcaf7) |
 
 ## Training
 
